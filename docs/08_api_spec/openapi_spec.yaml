@@ -1,0 +1,1317 @@
+openapi: 3.0.3
+info:
+  title: fast-guide API
+  description: 求职增效平台 API — 简历优化、模拟面试、知识缺口训练
+  version: 1.0.0
+
+servers:
+  - url: /api/v1
+    description: API v1
+
+tags:
+  - name: auth
+    description: 认证
+  - name: users
+    description: 用户信息
+  - name: resumes
+    description: 简历优化
+  - name: interviews
+    description: 模拟面试
+  - name: training
+    description: 知识缺口训练
+
+# ============================================================
+# 认证
+# ============================================================
+paths:
+  /auth/register:
+    post:
+      tags: [auth]
+      summary: 用户注册
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, name]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: user@example.com
+                password:
+                  type: string
+                  minLength: 8
+                  example: "mypassword123"
+                name:
+                  type: string
+                  maxLength: 100
+                  example: "张三"
+      responses:
+        "201":
+          description: 注册成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  email:
+                    type: string
+                  name:
+                    type: string
+                  access_token:
+                    type: string
+        "409":
+          $ref: "#/components/responses/ConflictError"
+
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: 用户登录
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+      responses:
+        "200":
+          description: 登录成功
+          headers:
+            Set-Cookie:
+              description: HttpOnly refresh_token cookie
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                  user:
+                    $ref: "#/components/schemas/UserInfo"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: 静默续期 Access Token
+      description: 前端 axios 拦截器在 401 时自动调用，refresh_token 通过 HttpOnly Cookie 传递
+      responses:
+        "200":
+          description: 续期成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: 退出登录
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: 退出成功，清除 refresh_token cookie
+
+  # ============================================================
+  # 用户
+  # ============================================================
+  /users/me:
+    get:
+      tags: [users]
+      summary: 获取当前用户信息
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserInfo"
+
+    put:
+      tags: [users]
+      summary: 更新个人信息
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 100
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserInfo"
+
+  # ============================================================
+  # 简历
+  # ============================================================
+  /resumes:
+    get:
+      tags: [resumes]
+      summary: 获取简历列表
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ResumeListItem"
+                  total:
+                    type: integer
+                  offset:
+                    type: integer
+                  limit:
+                    type: integer
+
+  /resumes/upload:
+    post:
+      tags: [resumes]
+      summary: 上传简历
+      description: 上传 PDF/DOCX 文件，可选绑定 JD 文本。上传成功后触发 arq 后台分析任务。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: PDF 或 DOCX 文件，最大 10MB
+                jd_text:
+                  type: string
+                  description: 目标 JD 文本（可选，最大 5000 字）
+      responses:
+        "201":
+          description: 上传成功，后台分析已启动
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResumeDetail"
+        "413":
+          $ref: "#/components/responses/FileTooLargeError"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /resumes/{id}:
+    get:
+      tags: [resumes]
+      summary: 获取简历详情
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResumeDetail"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+    delete:
+      tags: [resumes]
+      summary: 删除简历
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: 删除成功
+
+  /resumes/{id}/analysis:
+    get:
+      tags: [resumes]
+      summary: 获取简历评分报告
+      description: 返回最近一次分析结果。若简历仍在分析中，返回 status=analyzing。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResumeAnalysisResult"
+
+  /resumes/{id}/score:
+    post:
+      tags: [resumes]
+      summary: 针对新 JD 重新评分
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [jd_text]
+              properties:
+                jd_text:
+                  type: string
+                  maxLength: 5000
+      responses:
+        "201":
+          description: 评分任务已启动
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  analysis_id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    enum: [analyzing]
+
+  /resumes/{id}/rewrite:
+    get:
+      tags: [resumes]
+      summary: SSE 流式改写简历
+      description: 基于指定分析结果进行改写，返回 text/event-stream。
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Access Token（EventSource 不支持自定义 Header）
+        - name: analysis_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: SSE 流式改写内容
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: "见 sse_contract.md 2.1 节"
+
+  /resumes/{id}/rewrite/accept:
+    post:
+      tags: [resumes]
+      summary: 接受改写版本
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [analysis_id, rewritten_text]
+              properties:
+                analysis_id:
+                  type: string
+                  format: uuid
+                rewritten_text:
+                  type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  download_url:
+                    type: string
+                    description: MinIO 预签名下载 URL（有效期 15 分钟）
+
+  # ============================================================
+  # 面试
+  # ============================================================
+  /interviews/sessions:
+    get:
+      tags: [interviews]
+      summary: 获取面试历史列表
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/Limit"
+        - name: mode
+          in: query
+          schema:
+            type: string
+            enum: [resume_jd, jd_only, resume_only, free]
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/InterviewSessionListItem"
+                  total:
+                    type: integer
+                  offset:
+                    type: integer
+                  limit:
+                    type: integer
+
+    post:
+      tags: [interviews]
+      summary: 创建面试会话
+      description: |
+        创建面试会话并返回第一道题目。mode 决定必填字段：
+        - resume_jd: resume_id + jd_text 必填
+        - jd_only: jd_text 必填
+        - resume_only: resume_id 必填
+        - free: free_topic 必填
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionConfigInput"
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionCreatedResponse"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /interviews/sessions/{id}/answers:
+    post:
+      tags: [interviews]
+      summary: 提交答案（SSE 流式评分 + 下一题）
+      description: 提交文字答案，返回 SSE 流式评分反馈和下一题。见 sse_contract.md 2.2 节。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [answer_text]
+              properties:
+                answer_text:
+                  type: string
+      responses:
+        "200":
+          description: SSE 流式评分
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  /interviews/sessions/{id}/complete:
+    post:
+      tags: [interviews]
+      summary: 结束面试
+      description: 标记面试完成，触发 arq 后台生成汇总报告。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  session_id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    enum: [report_generating]
+                  message:
+                    type: string
+                    example: "面试已结束，正在生成报告..."
+
+  /interviews/sessions/{id}/report:
+    get:
+      tags: [interviews]
+      summary: 获取面试报告
+      description: 报告已生成时返回完整数据；生成中时返回 status=generating。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InterviewReportResponse"
+
+  # ============================================================
+  # 训练
+  # ============================================================
+  /training/plans:
+    post:
+      tags: [training]
+      summary: 创建训练计划
+      description: 从面试报告或 JD 生成训练计划，触发 arq 后台任务。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source_type]
+              properties:
+                source_type:
+                  type: string
+                  enum: [interview_report, jd_only]
+                session_id:
+                  type: string
+                  format: uuid
+                  description: source_type=interview_report 时必填
+                jd_text:
+                  type: string
+                  description: source_type=jd_only 时必填
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plan_id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    enum: [generating]
+
+  /training/plans/{id}/blueprint:
+    get:
+      tags: [training]
+      summary: 获取全局蓝图
+      description: 返回知识图谱、学习路径和总时长估算。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BlueprintResponse"
+
+  /training/plans/{id}/items/{item_id}:
+    get:
+      tags: [training]
+      summary: SSE 流式生成知识点学习内容
+      description: 分 4 层流式输出学习内容。见 sse_contract.md 2.4 节。
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: item_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: SSE 分层流式学习内容
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  /training/plans/{id}/items/{item_id}/complete:
+    post:
+      tags: [training]
+      summary: 标记知识点学习完成
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: item_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [completed]
+                  next_item_id:
+                    type: string
+                    format: uuid
+                    nullable: true
+                    description: 下一个待学习知识点 ID（全部完成时为 null）
+
+  /training/plans/{id}/items/{item_id}/summary:
+    post:
+      tags: [training]
+      summary: 提交费曼总结（SSE 流式返回评估）
+      description: 用户用自己的话总结学习内容，返回 SSE 评估反馈。见 sse_contract.md 2.5 节。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: item_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_summary]
+              properties:
+                user_summary:
+                  type: string
+                  minLength: 100
+                  maxLength: 500
+      responses:
+        "200":
+          description: SSE 费曼评估反馈
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  /training/plans/{id}/retest:
+    post:
+      tags: [training]
+      summary: 发起复测
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RetestCreatedResponse"
+
+  /training/retest/{id}/answers:
+    post:
+      tags: [training]
+      summary: 提交复测答案
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [answers]
+              properties:
+                answers:
+                  type: array
+                  items:
+                    type: object
+                    required: [topic, answer]
+                    properties:
+                      topic:
+                        type: string
+                      answer:
+                        type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  retest_id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    enum: [evaluating]
+
+  /training/retest/{id}/result:
+    get:
+      tags: [training]
+      summary: 获取复测结果
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RetestResultResponse"
+
+# ============================================================
+# Components
+# ============================================================
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Offset:
+      name: offset
+      in: query
+      schema:
+        type: integer
+        default: 0
+        minimum: 0
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        default: 20
+        minimum: 1
+        maximum: 100
+
+  schemas:
+    UserInfo:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    ResumeListItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        original_filename:
+          type: string
+        status:
+          type: string
+          enum: [pending, analyzing, analyzed, failed]
+        overall_score:
+          type: integer
+          nullable: true
+          description: 最近一次分析的综合评分（未分析时为 null）
+        created_at:
+          type: string
+          format: date-time
+
+    ResumeDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        original_filename:
+          type: string
+        storage_key:
+          type: string
+        status:
+          type: string
+          enum: [pending, analyzing, analyzed, failed]
+        file_size:
+          type: integer
+        mime_type:
+          type: string
+        jd_text:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    ResumeAnalysisResult:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        resume_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [analyzing, completed]
+          description: analyzing=分析中（前端继续轮询），completed=可展示
+        overall_score:
+          type: integer
+          minimum: 0
+          maximum: 100
+        dimension_scores:
+          type: object
+          properties:
+            relevance:
+              $ref: "#/components/schemas/DimensionScore"
+            keywords:
+              $ref: "#/components/schemas/DimensionScore"
+            structure:
+              $ref: "#/components/schemas/DimensionScore"
+            quantification:
+              $ref: "#/components/schemas/DimensionScore"
+        missing_keywords:
+          type: array
+          items:
+            type: string
+        matched_keywords:
+          type: array
+          items:
+            type: string
+        top_suggestions:
+          type: array
+          items:
+            type: string
+        rewrite_hints:
+          type: array
+          items:
+            type: string
+
+    DimensionScore:
+      type: object
+      properties:
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+        reason:
+          type: string
+        suggestions:
+          type: array
+          items:
+            type: string
+
+    SessionConfigInput:
+      type: object
+      required: [mode]
+      properties:
+        mode:
+          type: string
+          enum: [resume_jd, jd_only, resume_only, free]
+        resume_id:
+          type: string
+          format: uuid
+        jd_text:
+          type: string
+          maxLength: 5000
+        free_topic:
+          type: string
+          maxLength: 200
+        difficulty:
+          type: string
+          enum: [easy, medium, hard, adaptive]
+          default: medium
+        question_count:
+          type: integer
+          minimum: 3
+          maximum: 15
+          default: 5
+        input_mode:
+          type: string
+          enum: [text, voice]
+          default: text
+
+    SessionCreatedResponse:
+      type: object
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        first_question:
+          $ref: "#/components/schemas/InterviewQuestionData"
+        effective_difficulty:
+          type: string
+          enum: [easy, medium, hard]
+        question_index:
+          type: integer
+
+    InterviewQuestionData:
+      type: object
+      properties:
+        question_text:
+          type: string
+        question_type:
+          type: string
+          enum: [behavioral, technical, situational, case]
+        difficulty:
+          type: string
+          enum: [easy, medium, hard]
+        expected_points:
+          type: array
+          items:
+            type: string
+        follow_up_hints:
+          type: array
+          items:
+            type: string
+        time_suggestion_seconds:
+          type: integer
+          minimum: 30
+          maximum: 300
+
+    InterviewSessionListItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        mode:
+          type: string
+        difficulty:
+          type: string
+        status:
+          type: string
+        overall_score:
+          type: integer
+          nullable: true
+        question_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+
+    InterviewReportResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [generating, completed]
+        overall_score:
+          type: integer
+        dimension_scores:
+          type: object
+          properties:
+            technical:
+              type: integer
+            communication:
+              type: integer
+            structure:
+              type: integer
+            problem_solving:
+              type: integer
+        overall_assessment:
+          type: string
+        top_strengths:
+          type: array
+          items:
+            type: string
+        critical_gaps:
+          type: array
+          items:
+            type: string
+        hiring_recommendation:
+          type: string
+          enum: [strong_yes, yes, borderline, "no"]
+        learning_priorities:
+          type: array
+          items:
+            type: string
+        mode_insights:
+          type: string
+        questions:
+          type: array
+          description: 逐题回顾
+          items:
+            type: object
+            properties:
+              question_text:
+                type: string
+              answer_text:
+                type: string
+              total_score:
+                type: integer
+              dimensions:
+                type: object
+              strengths:
+                type: array
+                items:
+                  type: string
+              improvements:
+                type: array
+                items:
+                  type: string
+
+    BlueprintResponse:
+      type: object
+      properties:
+        plan_id:
+          type: string
+          format: uuid
+        source_type:
+          type: string
+          enum: [interview_report, jd_only]
+        status:
+          type: string
+          enum: [generating, active, completed, failed]
+        gaps:
+          type: array
+          items:
+            $ref: "#/components/schemas/KnowledgeGapData"
+        suggested_learning_order:
+          type: array
+          items:
+            type: string
+        total_estimated_minutes:
+          type: integer
+        knowledge_graph_summary:
+          type: string
+        candidate_strengths:
+          type: array
+          items:
+            type: string
+        completed_items:
+          type: integer
+        total_items:
+          type: integer
+
+    KnowledgeGapData:
+      type: object
+      properties:
+        item_id:
+          type: string
+          format: uuid
+        topic:
+          type: string
+        category:
+          type: string
+          enum: [technical_skill, domain_knowledge, soft_skill, tool_proficiency]
+        severity:
+          type: string
+          enum: [high, medium, low]
+        status:
+          type: string
+          enum: [locked, pending, in_progress, feynman_pending, completed]
+        estimated_minutes:
+          type: integer
+        prerequisite_topics:
+          type: array
+          items:
+            type: string
+        related_topics:
+          type: array
+          items:
+            type: string
+        leads_to:
+          type: array
+          items:
+            type: string
+
+    RetestCreatedResponse:
+      type: object
+      properties:
+        retest_id:
+          type: string
+          format: uuid
+        questions:
+          type: array
+          items:
+            type: object
+            properties:
+              topic:
+                type: string
+              question:
+                type: string
+              question_type:
+                type: string
+                enum: [concept, application, diagnosis]
+
+    RetestResultResponse:
+      type: object
+      properties:
+        retest_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [in_progress, completed]
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              topic:
+                type: string
+              score:
+                type: integer
+              mastery_level:
+                type: string
+                enum: [mastered, partial, not_mastered]
+              correct_points:
+                type: array
+                items:
+                  type: string
+              missing_points:
+                type: array
+                items:
+                  type: string
+              improvement_from_before:
+                type: integer
+        improvement_rate:
+          type: number
+          description: 平均进步百分比
+
+  responses:
+    UnauthorizedError:
+      description: 认证失败
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    example: TOKEN_EXPIRED
+                  message:
+                    type: string
+                    example: "Token 已过期"
+                  detail:
+                    nullable: true
+
+    NotFoundError:
+      description: 资源不存在
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    example: RESUME_NOT_FOUND
+                  message:
+                    type: string
+                  detail:
+                    nullable: true
+
+    ValidationError:
+      description: 请求参数校验失败
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    example: VALIDATION_ERROR
+                  message:
+                    type: string
+                  detail:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        field:
+                          type: string
+                        message:
+                          type: string
+
+    ConflictError:
+      description: 资源冲突
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    example: EMAIL_ALREADY_EXISTS
+                  message:
+                    type: string
+                  detail:
+                    nullable: true
+
+    FileTooLargeError:
+      description: 文件过大
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    example: FILE_TOO_LARGE
+                  message:
+                    type: string
+                    example: "文件大小超过 10MB 限制"
+                  detail:
+                    nullable: true
