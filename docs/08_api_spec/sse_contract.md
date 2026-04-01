@@ -6,6 +6,7 @@
 > | 日期 | 变更内容 | Agent |
 > |------|---------|-------|
 > | 2026-04-01 | 初始版本 | api-spec-agent |
+> | 2026-04-01 | 根据 DashScope MVP 实测补充面试评分 SSE 的归一化约束 | Codex |
 
 ---
 
@@ -71,6 +72,16 @@ data: {"done": true, "total_tokens": 1240}
 
 **响应：** 不返回 JSON body，改为 SSE 流。
 
+**实测约束：**
+
+- 百炼复杂评分场景可能返回不完整 JSON、解释性文本或漂移后的维度 key。
+- `eval_done.evaluation` 必须是后端归一化后的固定结构，禁止直接透传供应商原始输出。
+- 若归一化失败，服务端应发送错误事件并结束流，例如：
+
+```
+data: {"error": "LLM_SERVICE_ERROR: evaluation normalization failed", "done": true}
+```
+
 **事件序列：**
 
 ```
@@ -114,6 +125,13 @@ data: {"done": true}
 | `eval_done` | 评分完成，`evaluation` 为完整 AnswerEvaluationOutput |
 | `next_question` | 下一题（最后一题时无此事件） |
 | `session_complete` | 所有题目回答完毕（替代 next_question） |
+
+`evaluation.dimensions` 的 key 必须固定为：
+
+- `content_accuracy`
+- `structure_clarity`
+- `star_adherence`
+- `communication`
 
 ---
 

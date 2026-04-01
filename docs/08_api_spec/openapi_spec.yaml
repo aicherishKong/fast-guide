@@ -1,3 +1,5 @@
+# 变更记录
+# | 2026-04-01 | 根据 LangChain + DashScope MVP 实测更新评分与结构化输出参数约束 | Codex |
 openapi: 3.0.3
 info:
   title: fast-guide API
@@ -276,7 +278,7 @@ paths:
     get:
       tags: [resumes]
       summary: 获取简历评分报告
-      description: 返回最近一次分析结果。若简历仍在分析中，返回 status=analyzing。
+      description: 返回最近一次分析结果。若简历仍在分析中，返回 status=analyzing。评分结果是后端对 DashScope 结构化输出做归一化后的稳定契约，不直接透传模型原始 JSON。
       security:
         - bearerAuth: []
       parameters:
@@ -447,6 +449,7 @@ paths:
         - jd_only: jd_text 必填
         - resume_only: resume_id 必填
         - free: free_topic 必填
+        - LangChain + DashScope MVP 实测下，首题结构化输出稳定字段为 question_text、question_type、difficulty、expected_points、time_suggestion_seconds；follow_up_hints 为可选补充字段。
       security:
         - bearerAuth: []
       requestBody:
@@ -468,7 +471,7 @@ paths:
     post:
       tags: [interviews]
       summary: 提交答案（SSE 流式评分 + 下一题）
-      description: 提交文字答案，返回 SSE 流式评分反馈和下一题。见 sse_contract.md 2.2 节。
+      description: 提交文字答案，返回 SSE 流式评分反馈和下一题。见 sse_contract.md 2.2 节。评分类字段必须由后端归一化为固定维度，不得直接透传模型原始输出。
       security:
         - bearerAuth: []
       parameters:
@@ -905,8 +908,10 @@ components:
           type: integer
           minimum: 0
           maximum: 100
+          description: 综合得分，后端归一化为 0-100。供应商原始输出如为 0-10 或其他刻度，必须先换算后再返回。
         dimension_scores:
           type: object
+          description: 固定四维评分结构。DashScope 原始评分 key 若漂移，后端必须映射为 relevance、keywords、structure、quantification 后再返回。
           properties:
             relevance:
               $ref: "#/components/schemas/DimensionScore"
@@ -926,6 +931,8 @@ components:
             type: string
         top_suggestions:
           type: array
+          maxItems: 3
+          description: 最重要的 3 条改进建议。若模型返回超过 3 条，后端应裁剪。
           items:
             type: string
         rewrite_hints:
@@ -993,6 +1000,7 @@ components:
 
     InterviewQuestionData:
       type: object
+      description: 面试题结构化输出。MVP 实测下 qwen-plus 可稳定返回 question_text、question_type、difficulty、expected_points、time_suggestion_seconds；follow_up_hints 可能缺失。
       properties:
         question_text:
           type: string
@@ -1088,6 +1096,7 @@ components:
                 type: integer
               dimensions:
                 type: object
+                description: 单题评分维度必须归一化为 content_accuracy、structure_clarity、star_adherence、communication；若供应商原始输出无法映射，不得直接下发给前端。
               strengths:
                 type: array
                 items:

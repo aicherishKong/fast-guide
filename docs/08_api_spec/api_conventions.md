@@ -6,6 +6,7 @@
 > | 日期 | 变更内容 | Agent |
 > |------|---------|-------|
 > | 2026-04-01 | 初始版本 | api-spec-agent |
+> | 2026-04-01 | 根据 LangChain + DashScope MVP 实测补充 LLM/Embedding 参数约束与输出归一化要求 | Codex |
 
 ---
 
@@ -21,6 +22,41 @@
 | ID 格式 | UUID v4（`550e8400-e29b-41d4-a716-446655440000`）|
 | 字段命名 | snake_case |
 | 空值 | 字段不存在 = 未传；字段值 `null` = 显式为空 |
+
+### 1.1 LangChain + DashScope MVP 实测约束
+
+以下约束来自 2026-04-01 本地最小 MVP 实测，测试脚本为 `E:\fuyao\project\fast-guide\test_dashscope_mvp.py`：
+
+| 项 | 实测结论 |
+|----|---------|
+| Chat 兼容端点 | `https://dashscope.aliyuncs.com/compatible-mode/v1` 可通过 `langchain_openai.ChatOpenAI` 直接调用 |
+| 模型分层 | `qwen-turbo`、`qwen-plus`、`qwen-max` 三档基础调用均通过 |
+| 结构化输出 | `with_structured_output(..., method="json_schema")` 对浅层 Schema（关键词提取、单题面试题）可用 |
+| 复杂评分输出 | 对嵌套评分 Schema，模型可能返回解释性文本、非预期维度 key、或不完整 JSON；后端不得直接透传原始 LLM 输出 |
+| 流式输出 | `astream()` 可用，结束阶段可拿到 token 用量；SSE 仅对外暴露归一化后的 `chunk/done/total_tokens/error` 契约 |
+| 并行调用 | `RunnableParallel` 在关键词提取场景可用 |
+| Embedding | `text-embedding-v3` 在 `dimensions=1024` 下实测通过 |
+
+### 1.2 后端归一化要求
+
+- 所有对前端暴露的评分结果必须由后端做 Schema 归一化，不得直接返回百炼原始 JSON。
+- 若百炼返回字段缺失、维度 key 漂移、或混入解释性文本，后端必须执行二次解析/映射；映射失败时返回 `503 LLM_SERVICE_ERROR`。
+- 简历评分固定输出维度为 `relevance`、`keywords`、`structure`、`quantification`。
+- 面试单题评分固定输出维度为 `content_accuracy`、`structure_clarity`、`star_adherence`、`communication`。
+- `top_suggestions` 对外接口固定最多返回 3 条，即使上游模型返回更多建议，后端也应裁剪。
+
+### 1.3 LangChain 参数约定
+
+| 参数 | 约定值 |
+|------|--------|
+| `temperature` | `0.2` |
+| `max_retries` | `2` |
+| `streaming` | `true` |
+| `stream_usage` | `true` |
+| `with_structured_output` | 优先 `method=\"json_schema\"`，复杂嵌套对象必须增加后端兜底校验 |
+| `OpenAIEmbeddings.model` | `text-embedding-v3` |
+| `OpenAIEmbeddings.dimensions` | `1024` |
+| `OpenAIEmbeddings.check_embedding_ctx_length` | 建议关闭，避免兼容模式下 tokenizer 检查导致额外问题 |
 
 ---
 
